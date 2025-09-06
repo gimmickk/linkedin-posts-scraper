@@ -1,0 +1,14 @@
+{
+  "title": "LinkedIn Post Scraper",
+  "description": "Scrape recent posts from a public LinkedIn profile.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "profileUrl": {
+      "title": "LinkedIn profile URL",
+      "type": "string",
+      "description": "Public LinkedIn profile to scrape (e.g. https://www.linkedin.com/in/mickael-raynier-growth-manager-freelance/)"
+    }
+  },
+  "required": ["profileUrl"]
+}
