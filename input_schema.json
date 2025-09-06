@@ -19,8 +19,8 @@
     "linkedinSessionCookie": {
       "type": "string",
       "title": "LinkedIn li_at cookie",
-      "description": "Optionnel – nécessite une authentification pour récupérer les vues",
-      "editor": "password"
+      "description": "Optionnel – nécessaire pour récupérer les vues et autres infos privées",
+      "editor": "hidden"
     }
   },
   "required": ["profileUrl"]
