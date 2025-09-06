@@ -1,13 +1,13 @@
 FROM apify/actor-node-playwright:latest
 
-# copie du code
+# copier le code
 COPY . ./
 
-# installe les deps
+# installer les deps
 RUN npm ci || npm install
 
-# compile TypeScript -> dist/
+# compiler TypeScript -> dist/
 RUN npm run build
 
-# lance le JS compilé (pas de tsx)
+# lancer le JS compilé
 CMD ["node", "dist/main.js"]
