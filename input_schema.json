@@ -7,8 +7,18 @@
     "profileUrl": {
       "title": "LinkedIn profile URL",
       "type": "string",
-      "editor": "textfield",
       "description": "Public LinkedIn profile to scrape (e.g. https://www.linkedin.com/in/mickael-raynier-growth-manager-freelance/)"
+    },
+    "maxPosts": {
+      "type": "integer",
+      "title": "Max posts to fetch",
+      "default": 5
+    },
+    "linkedinSessionCookie": {
+      "type": "string",
+      "title": "LinkedIn li_at cookie",
+      "description": "Optionnel – nécessite une authentification pour récupérer les vues",
+      "editor": "password"
     }
   },
   "required": ["profileUrl"]
