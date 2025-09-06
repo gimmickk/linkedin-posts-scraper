@@ -1,115 +1,153 @@
-// Apify SDK - toolkit for building Apify Actors (Read more at https://docs.apify.com/sdk/js/).
-import { Actor } from 'apify';
-import { config } from 'dotenv';
-import { createHarvestApiScraper } from './utils/scraper.js';
+import { Actor, log } from 'apify';
 
-config();
+type Input = {
+  profileUrl: string;
+  maxPosts?: number;
+  linkedinSessionCookie?: string; // li_at (optionnel)
+};
 
-// this is ESM project, and as such, it requires you to specify extensions in your relative imports
-// read more about this here: https://nodejs.org/docs/latest-v18.x/api/esm.html#mandatory-file-extensions
-// note that we need to use `.js` even when inside TS files
-// import { router } from './routes.js';
+type Post = {
+  url: string;
+  text: string;
+  dateText?: string;
+  reactionsText?: string;
+  commentsText?: string;
+};
 
-// The init() call configures the Actor for its environment. It's recommended to start every Actor with an init().
-await Actor.init();
-
-export interface Input {
-  postedLimit: '24h' | 'week' | 'month';
-  page?: string;
-  scrapePages?: string;
-  maxPosts: number | string;
-  targetUrls?: string[];
-  profileUrls?: string[];
-  profilePublicIdentifiers?: string[];
-  profileIds?: string[];
-  companyUrls?: string[];
-  companyPublicIdentifiers?: string[];
-  companyIds?: string[];
-  authorsCompanies?: string[];
-  authorsCompanyUrls?: string[];
-  authorsCompanyPublicIdentifiers?: string[];
-  authorsCompanyIds?: string[];
-
-  scrapeReactions?: boolean;
-  maxReactions?: number;
-  scrapeComments?: boolean;
-  maxComments?: number;
-  commentsPostedLimit?: 'any' | '24h' | 'week' | 'month';
+function toActivityUrl(profileUrl: string) {
+  const u = profileUrl.trim();
+  const base = u.endsWith('/') ? u.slice(0, -1) : u;
+  return `${base}/detail/recent-activity/shares/`;
 }
-// Structure of input is defined in input_schema.json
-const input = await Actor.getInput<Input>();
-if (!input) throw new Error('Input is missing!');
-const originalInput = JSON.parse(JSON.stringify(input)); // deep copy to avoid mutation
 
-const profiles = [
-  ...(input.profileUrls || []).map((url) => ({ profilePublicIdentifier: url })),
-  ...(input.profilePublicIdentifiers || []).map((profilePublicIdentifier) => ({
-    profilePublicIdentifier,
-  })),
-  ...(input.profileIds || []).map((profileId) => ({ profileId })),
-];
-const companies = [
-  ...(input.companyUrls || []).map((url) => ({ companyUniversalName: url })),
-  ...(input.companyPublicIdentifiers || []).map((companyUniversalName) => ({
-    companyUniversalName,
-  })),
-  ...(input.companyIds || []).map((companyId) => ({ companyId })),
-];
-const authorsCompanies = [
-  ...(input.authorsCompanyPublicIdentifiers || []).map((url) => ({
-    authorsCompanyUniversalName: url,
-  })),
-  ...(input.authorsCompanyIds || []).map((authorsCompanyId) => ({
-    authorsCompanyId,
-  })),
-  ...(input.authorsCompanyUrls || []).map((url) => ({ authorsCompanyUniversalName: url })),
-  ...(input.authorsCompanies || []).map((authorsCompany) => ({ authorsCompany })),
-];
-const targets = [...(input.targetUrls || []).map((url) => ({ targetUrl: url }))];
+function parseLiAt(raw?: string) {
+  if (!raw) return null;
+  const m = raw.includes('li_at=')
+    ? raw.match(/li_at=([^;]+)/)
+    : [, raw.trim()];
+  return m?.[1] || null;
+}
 
-const { actorMaxPaidDatasetItems } = Actor.getEnv();
+async function autoScroll(page: any, maxMs = 8000) {
+  const start = Date.now();
+  let last = 0;
+  while (Date.now() - start < maxMs) {
+    const cur = await page.evaluate('document.body.scrollHeight');
+    if (cur === last) break;
+    last = cur;
+    await page.mouse.wheel(0, 12000);
+    await page.waitForTimeout(600);
+  }
+}
 
-export type ScraperState = {
-  itemsLeft: number;
-  datasetLastPushPromise?: Promise<any>;
-};
-const state: ScraperState = {
-  itemsLeft: actorMaxPaidDatasetItems || 1000000,
-};
+async function extractPosts(page: any, wanted: number): Promise<Post[]> {
+  // Sélecteurs tolérants aux changements LinkedIn
+  const POSTS_SEL = [
+    'div.feed-shared-update-v2',             // ancien layout
+    'div[data-urn*="activity"]',             // nouveau layout
+    'article:has(a[href*="/activity/"])'     // fallback
+  ].join(',');
 
-const scraper = await createHarvestApiScraper({
-  concurrency: 6,
-  state,
-  input,
-  reactionsConcurrency: 2,
-  originalInput,
-});
+  await page.waitForSelector(POSTS_SEL, { timeout: 15000 });
 
-const commonArgs = {
-  scrapePages: Number(input.scrapePages),
-  maxPosts: input.maxPosts === 0 || input.maxPosts === '0' ? 0 : Number(input.maxPosts) || null,
-  total: profiles.length + companies.length + authorsCompanies.length + targets.length,
-};
+  // charge plus si besoin
+  await autoScroll(page, 4000);
 
-const promises = [
-  ...[...profiles, ...companies, ...authorsCompanies, ...targets].map((profile) => {
-    return scraper.addJob({
-      entity: profile,
-      params: {
-        postedLimit: input.postedLimit,
-        sortBy: 'date',
-        page: input.page || '1',
+  const items: Post[] = await page.$$eval(POSTS_SEL, (els) => {
+    const takeText = (el: Element) =>
+      (el.textContent || '').replace(/\s+/g, ' ').trim();
+
+    const pick = (root: Element, selectors: string[]) => {
+      for (const s of selectors) {
+        const n = root.querySelector(s);
+        if (n) return n as HTMLElement;
+      }
+      return null;
+    };
+
+    const out: Post[] = [];
+    for (const el of els) {
+      const linkEl =
+        pick(el, ['a[href*="/posts/"]', 'a[href*="/activity/"]']) ||
+        pick(el, ['a.app-aware-link']);
+      const url = linkEl?.getAttribute('href') || '';
+
+      // contenu (texte principal)
+      const textEl =
+        pick(el, ['div.update-components-text', 'div[dir="ltr"]', 'span.break-words']) || el;
+      const text = takeText(textEl).slice(0, 1500);
+
+      // date
+      const dateEl = pick(el, ['span.update-components-actor__sub-description', 'span.visually-hidden', 'time']);
+      const dateText = dateEl ? takeText(dateEl) : undefined;
+
+      // métriques visibles
+      const reactionsEl = pick(el, ['span.social-details-social-counts__reactions-count', 'span.update-v2-social-activity__summation-count']);
+      const commentsEl  = pick(el, ['span.social-details-social-counts__comments', 'a[href*="comments"]']);
+      const reactionsText = reactionsEl ? takeText(reactionsEl) : undefined;
+      const commentsText  = commentsEl ? takeText(commentsEl)  : undefined;
+
+      if (url || text) {
+        out.push({
+          url: url.startsWith('http') ? url : (url ? `https://www.linkedin.com${url}` : ''),
+          text,
+          dateText,
+          reactionsText,
+          commentsText,
+        });
+      }
+    }
+    return out;
+  });
+
+  return items.slice(0, Math.max(1, wanted));
+}
+
+await Actor.init();
+try {
+  const input = (await Actor.getInput()) as Input;
+  if (!input?.profileUrl) throw new Error('`profileUrl` est requis dans l’input.');
+
+  const maxPosts = Math.max(1, input.maxPosts ?? 5);
+  const targetUrl = toActivityUrl(input.profileUrl);
+  const liAt = parseLiAt(input.linkedinSessionCookie);
+
+  log.info(`profil: ${input.profileUrl} → ${targetUrl} | maxPosts=${maxPosts}${liAt ? ' | cookie: oui' : ''}`);
+
+  // playwright est préinstallé dans l’image apify/actor-node-playwright
+  const { chromium }: any = await import('playwright');
+
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    viewport: { width: 1366, height: 900 },
+  });
+
+  // cookie optionnel pour posts non publics / métriques privées
+  if (liAt) {
+    await context.addCookies([
+      {
+        name: 'li_at',
+        value: liAt,
+        domain: '.linkedin.com',
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
       },
-      ...commonArgs,
-    });
-  }),
-];
+    ]);
+  }
 
-await Promise.all(promises).catch((error) => {
-  console.error(`Error scraping profiles:`, error);
-});
+  const page = await context.newPage();
+  await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 45000 });
 
-await state.datasetLastPushPromise;
+  const posts = await extractPosts(page, maxPosts);
+  await Actor.pushData(posts);
 
-// Gracefully exit the Actor process. It's recommended to quit all Actors with an exit().
-await Actor.exit();
+  log.info(`ok: ${posts.length} post(s) extrait(s).`);
+  await browser.close();
+} catch (err: any) {
+  log.exception(err, 'scrape_failed');
+  throw err;
+} finally {
+  await Actor.exit();
+}
