@@ -2,9 +2,7 @@ FROM apify/actor-node-playwright:latest
 
 COPY . ./
 
+# Installation des dépendances locales (tsx est déjà dans package.json)
 RUN npm install
 
-# Ajout : installation de tsx globalement
-RUN npm install -g tsx
-
-CMD ["tsx", "src/main.ts"]
+CMD ["npx", "tsx", "src/main.ts"]
