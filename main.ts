@@ -61,43 +61,45 @@ const crawler = new PlaywrightCrawler({
       await page.waitForTimeout(2000);
     }
 
-    const items: Post[] = await page.$$eval(POSTS_SEL, (els: any) => {
-      const takeText = (el: Element) =>
-        (el.textContent || '').replace(/\s+/g, ' ').trim();
-      const pick = (root: Element, selectors: string[]) => {
-        for (const s of selectors) {
-          const n = root.querySelector(s);
-          if (n) return n as HTMLElement;
-        }
-        return null;
-      };
-      const out: any[] = [];
-      for (const el of els) {
-        const linkEl =
-          pick(el, ['a[href*="/posts/"]', 'a[href*="/activity/"]']) ||
-          pick(el, ['a.app-aware-link']);
-        const url = linkEl?.getAttribute('href') || '';
-        const textEl =
-          pick(el, ['div.update-components-text', 'div[dir="ltr"]', 'span.break-words']) || el;
-        const text = takeText(textEl).slice(0, 1500);
-        const dateEl = pick(el, [
-          'span.update-components-actor__sub-description',
-          'span.visually-hidden',
-          'time',
-        ]);
-        const dateText = dateEl ? takeText(dateEl) : undefined;
-        const reactionsEl = pick(el, [
-          'span.social-details-social-counts__reactions-count',
-          'span.update-v2-social-activity__summation-count',
-        ]);
-        const commentsEl = pick(el, [
-          'span.social-details-social-counts__comments',
-          'a[href*="comments"]',
-        ]);
-        const reactionsText = reactionsEl ? takeText(reactionsEl) : undefined;
-        const commentsText = commentsEl ? takeText(commentsEl) : undefined;
+    // Alternative approach: use page.evaluate instead of page.$$eval
+    const items = await page.evaluate(() => {
+      const posts = document.querySelectorAll('div.feed-shared-update-v2');
+      const results = [];
+      
+      for (let i = 0; i < posts.length; i++) {
+        const post = posts[i];
+        
+        // Get URL
+        const linkEl = post.querySelector('a[href*="/posts/"]') || 
+                      post.querySelector('a[href*="/activity/"]') ||
+                      post.querySelector('a.app-aware-link');
+        const url = linkEl ? linkEl.getAttribute('href') || '' : '';
+        
+        // Get text
+        const textEl = post.querySelector('div.update-components-text') || 
+                      post.querySelector('div[dir="ltr"]') ||
+                      post.querySelector('span.break-words') ||
+                      post;
+        const text = textEl ? (textEl.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 1500) : '';
+        
+        // Get date
+        const dateEl = post.querySelector('span.update-components-actor__sub-description') ||
+                      post.querySelector('span.visually-hidden') ||
+                      post.querySelector('time');
+        const dateText = dateEl ? (dateEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        
+        // Get reactions
+        const reactionsEl = post.querySelector('span.social-details-social-counts__reactions-count') ||
+                           post.querySelector('span.update-v2-social-activity__summation-count');
+        const reactionsText = reactionsEl ? (reactionsEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        
+        // Get comments
+        const commentsEl = post.querySelector('span.social-details-social-counts__comments') ||
+                          post.querySelector('a[href*="comments"]');
+        const commentsText = commentsEl ? (commentsEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+        
         if (url || text) {
-          out.push({
+          results.push({
             url: url.startsWith('http') ? url : (url ? `https://www.linkedin.com${url}` : ''),
             text,
             dateText,
@@ -106,7 +108,8 @@ const crawler = new PlaywrightCrawler({
           });
         }
       }
-      return out;
+      
+      return results;
     });
 
     console.log(`Found ${items.length} posts`);
