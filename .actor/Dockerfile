@@ -1,6 +1,10 @@
 FROM apify/actor-node-playwright:latest
 
 COPY . ./
+
 RUN npm install
 
-CMD ["npx", "tsx", "src/main.ts"]
+# Ajout : installation de tsx globalement
+RUN npm install -g tsx
+
+CMD ["tsx", "src/main.ts"]
