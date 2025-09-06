@@ -7,7 +7,8 @@
     "profileUrl": {
       "title": "LinkedIn profile URL",
       "type": "string",
-      "description": "Public LinkedIn profile to scrape (e.g. https://www.linkedin.com/in/mickael-raynier-growth-manager-freelance/)"
+      "description": "Public LinkedIn profile to scrape (e.g. https://www.linkedin.com/in/mickael-raynier-growth-manager-freelance/)",
+      "editor": "textfield"
     },
     "maxPosts": {
       "type": "integer",
