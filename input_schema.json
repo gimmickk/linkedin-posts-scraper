@@ -13,6 +13,7 @@
     "maxPosts": {
       "type": "integer",
       "title": "Max posts to fetch",
+      "description": "Nombre maximum de posts à récupérer",
       "default": 5
     },
     "linkedinSessionCookie": {
